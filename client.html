@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+   <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+   <script src="/socket.io/socket.io.js"></script>
+   <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.3/css/bootstrap.min.css"
+      integrity="sha384-MCw98/SFnGE8fJT3GXwEOngsV7Zt27NXFoaoApmYm81iuXoPkFOJwJ8ERdknLPMO" crossorigin="anonymous">
+   <script type="text/javascript" defer>
+
+      // Client username. Declared globally 
+      let usr;
+
+      var socketio = io.connect();
+      socketio.on("connected", function () {
+         //socketio.emit('adduser', prompt("What's your name?"));
+      })
+
+      socketio.on("username_to_client", function (data) {
+         let users = data['users'];
+         let isOwner = false;
+         let owner = "";
+         let me = data['username'];
+         let room = data['room'];
+         let rooms = data['rooms'];
+
+         //Append an HR thematic break and the escaped HTML of the new message
+         document.getElementById("chatlog").appendChild(document.createElement("hr"));
+         $("#login-div").html("");
+         $("#create-chat-room").html(`Create a chatroom (if you want)
+         <input type="text" id="chatroom-input"/>
+         <button class="user" onclick="newChatRoom()">Create</button>
+         <button class="user" onclick="createChatRoomPasswordInput()">Create with Password</button>`);
+         
+         $('#chatrooms-list').append("<br>Chatrooms<br>");
+         rooms.forEach(element => {
+            $('#chatrooms-list').append(`<ul><button id="${element}" onclick="enterChatroom(this.innerHTML)">${element}</button></ul>`);
+         });
+     
+         updateUserList(users, owner, isOwner, room, me);
+
+         $("#chatlog").append(document.createTextNode("Welcome to " + data['room'] + ", " + data['username']));
+         $("#message-box").html(`Type your message <input class="message" type="text" id="message_input"/><button class="message" onclick="sendMessage()">send</button>`);
+
+      });
+
+      socketio.on("updateChat", function(data){
+         //Reset users list
+         let users = data['users'];
+         let room = data['room'];
+         let owner = data['owner'];
+         let isOwner = data['isOwner'];
+         let me = data['username'];
+
+         $('#users-list').html("");
+         $('#users-list').append("<br>"+room+" members: <br>");
+         
+         updateUserList(users, owner, isOwner, room, me);
+
+         if(data['roomchange']){
+            //Reset chatroom password div to empty
+            $("#chatroom-password-div").html("");
+            // Update with conversation from new room 
+            $("#chatlog").html(data['conversation']);
+
+            document.getElementById("chatlog").appendChild(document.createElement("hr"));
+            document.getElementById("chatlog").appendChild(document.createTextNode(data['message']));
+         } else {
+         document.getElementById("chatlog").appendChild(document.createElement("hr"));
+         document.getElementById("chatlog").appendChild(document.createTextNode(data['username']+': '+data['message']));
+         }
+      });
+
+
+      socketio.on("chatroom_to_client",function(data){
+         // Reset create chatroom div
+         $('#create-chat-room').html(`Create a chatroom (if you want)
+         <input type="text" id="chatroom-input"/>
+         <button class="user" onclick="newChatRoom()">Create</button>
+         <button class="user" onclick="createChatRoomPasswordInput()">Create with Password</button>`);
+
+         //Add new chat room to list
+         let room = data["chatroom"];
+         $('#chatrooms-list').append(`<ul><button id="${room}" onclick="enterChatroom(this.innerHTML)">${room}</button></ul>`)
+
+      });
+
+      socketio.on("message_to_client", function (data) {
+         //Append an HR thematic break and the escaped HTML of the new message
+         document.getElementById("chatlog").appendChild(document.createElement("hr"));
+         document.getElementById("chatlog").appendChild(document.createTextNode(data['username'] + ': ' + data['message']));
+      });
+
+      socketio.on("client_join_chatroom", function (socket) {
+         socket.join(socket['chatroom']);
+         $("#chatlog").appendChild(document.createTextNode("Welcome to " + socket.room + ", " + data['username']));
+         $("#message-box").html(`Type your message <input class="message" type="text" id="message_input"/><button class="message" onclick="sendMessage()">send</button>`);
+      });
+
+      let requested_room;
+      //Display the password input, and set global requested_room value to room that will be submitted
+      socketio.on("request_room_password", function(data){
+         requested_room = data['room'];    
+         console.log("Request room w/ password: "+requested_room,); 
+         $("#chatroom-password-div").html(`<input placeholder="EnterPassword" type="password" id="room-password"/><input type="submit" onclick="submitRoomPassword(${requested_room})"/><p></p>`);
+      });
+
+      // If password is incorrect show alert
+      socketio.on("incorrect_password", function(data){
+         if(data['incorrect']){
+            alert("Incorrect password");
+         }
+      });
+      
+      socketio.on("failed_login", function (data) {
+         $('#failure-div').html('<br><div class = "jumbotron">Invalid username and/or password. Please try again.</div>');
+      });
+
+      socketio.on("receive_pm", function(data) {
+         $('#pm-div').append(
+            `
+            <br>
+            <p>
+               PM from ${data['sender']}: ${data['message']}
+            </p>
+            `
+         )
+      });
+
+
+      function sendMessage() {
+         var msg = document.getElementById("message_input").value;
+         socketio.emit("message_to_server", { message: msg, username: usr });
+         console.log(msg);
+         // Clear chat box
+         $("#message_input").val('');
+      }
+
+      function login() {
+         usr = $('#username-input').val();
+         pass = $('#password-input').val();
+         socketio.emit("login_to_server", { username: usr, password: pass });
+      }
+
+      function register() {
+         usr = $('#username-input').val();
+         pass = $('#password-input').val();
+         socketio.emit("register_to_server", { username: usr, password: pass });
+      }
+
+      // Send the newly created chatroom to the server
+      function newChatRoom() {
+         let room = $("#chatroom-input").val();
+         if(room){
+            socketio.emit("chatroom_to_server", {room: room});
+            console.log("room: " + room);
+         }else{
+            alert("You must enter a name for your room!");
+         }
+      } 
+
+      // Display textbox for password for chatroom
+      function createChatRoomPasswordInput(){
+         let room = $("#chatroom-input").val();
+         if(room){
+            $('#create-chat-room').html(`<input placeholder="Password" type="password" id="chatroom-password"/>
+                                       <input type="hidden" id="hidden-room" value="${room}"/>
+                                       <input type="submit" value="submit" onclick="emitNewChatRoomPassword()"/>`);
+         }else{
+            alert("You must enter a name for your room!");
+         }
+      }
+
+      // User has entered new password
+      function submitRoomPassword(){
+          let password = $("#room-password").val();
+          console.log("Room: "+requested_room);
+          socketio.emit("submit_password_to_server", {room:requested_room, password:password});
+      }
+
+      // Send chatroom password to dom
+      function emitNewChatRoomPassword(){
+            let password = $("#chatroom-password").val();
+            let room = $("#hidden-room").val();
+            console.log("Password: "+password+", room: "+room);
+            if(password){
+               socketio.emit("password_room_to_server", {room: room, password:password});
+            }else{
+               alert("You must enter a password");
+            }
+      }
+
+      // Send the request to enter a chatroom to the server
+      function enterChatroom(room) {
+         let conversation = $('#chatlog').html();
+         console.log("User: " + usr + " entering chat room: " + room);
+         socketio.emit("join_server_chatroom", { room: room, oldConversation: conversation });
+      }
+
+      // Send a pm
+      function sendPM(recipient, message) {
+         socketio.emit("send_pm", { recipient: recipient, message: message });
+      }
+
+      function banUser(baner, banee, room) {
+         socketio.emit('ban', {baner: baner, banee: banee, room: room});
+      }
+
+      // Helper function called in update chat to handle user list
+      function updateUserList(users, owner, isOwner, room, me){
+         $('#users-list').html("");
+         $('#users-list').append("<br>"+room+" members: <br>");
+         if(isOwner){
+            users.forEach(user => {
+               console.log("populating list of users: "+user);
+               
+               if(user === owner){
+                  $('#users-list').append(`<ul id="member-${user}">Owner: <strong>${user}</strong> </ul>`);
+               } else{
+                  $('#users-list').append(`<ul id="member-${user}">${user} <input type="text" id="pm-text-${user}" ><button id="send-button-${user}">send pm</button>  <button onclick="kickOut(${user})">Kick</button>   <button onClick="banUser('${me}', '${user}', '${room}')">Ban</button></ul>`);
+                  $(`#send-button-${user}`).on('click', function() {
+                     sendPM(user, $(`#pm-text-${user}`).val());
+                  });
+                  $(`#kick-out-${user}`).on('click', function() {
+                     kickOut(user);
+                  });
+               }
+            });
+         } else{
+               users.forEach(user => {
+                  console.log("populating list of users: "+user);
+                  if(user === owner){
+                     $('#users-list').append(`<ul id="member-${user}">Owner: <strong>${user}</strong>  <input type="text" id="pm-text-${user}" ><button id="send-button-${user}">send pm</button></ul>`);
+                     $(`#send-button-${user}`).on('click', function() {
+                        sendPM(user, $(`#pm-text-${user}`).val());
+                     });
+                  } else if (user === me) {
+                     $('#users-list').append(`<ul id="member-${user}">${user} </ul>`);
+                  } else{
+                     $('#users-list').append(`<ul id="member-${user}">${user} <input type="text" id="pm-text-${user}" ><button id="send-button-${user}">send pm</button></ul>`);
+                     $(`#send-button-${user}`).on('click', function() {
+                        sendPM(user, $(`#pm-text-${user}`).val());
+                     });
+                  }
+               });
+            }
+         }
+     
+
+   </script>
+</head>
+
+<body>
+   <div class="container">
+      <div id="login-div" class="form-group">
+         <h1>Register or Login to the Trozanne (tm) Chatroom Server!</h1>
+         <label for="username-input">username</label>
+         <input class="user form-control" type="text" id="username-input" />
+         <label for="username-input">password</label>
+         <input class="user form-control" type="password" id="password-input" />
+         <br>
+         <div class="btn-group">
+            <button class="user btn-primary" onclick="register()">Register</button>
+            <button class="user btn-secondary" onclick="login()">Login</button>
+         </div>
+         <div id="failure-div"></div>
+      </div>
+      <div id="pm-div" style="background-color: lightpink"></div>
+      <div id="create-chat-room"></div>
+      <li id="chatrooms-list" style="list-style-type: none;"></li>
+      <div id="chatroom-password-div"></div>
+      <div id="message-box"></div>
+      <li id="users-list" style="list-style-type: none;"></li>
+      <div id="chatlog"></div>
+   </div>
+</body>
+
+</html>
